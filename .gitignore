@@ -1,0 +1,19 @@
+# Per-prospect credentials — NEVER commit
+**/.env
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+
+# Logs from sync runs
+*.log

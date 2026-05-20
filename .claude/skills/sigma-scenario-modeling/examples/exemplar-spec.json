@@ -1,0 +1,250 @@
+{
+  "_comment": "Minimal exemplar of a scenario-modeling workbook + data-model. Domain-agnostic — a weekly time series with named scenarios, approval, and lock-down. Names like 'forecast' should be renamed per domain (plan / scenario / what-if).",
+
+  "dataModel": {
+    "name": "scenario_modeling_exemplar",
+    "elements": [
+      {
+        "id": "base-series",
+        "kind": "table",
+        "name": "Base Series",
+        "description": "One row per primary grain — here, one row per week.",
+        "source": { "kind": "warehouse-table", "path": ["<your_db>", "<your_schema>", "<your_base_table>"] },
+        "columns": [
+          { "id": "bs-week", "name": "Week", "formula": "DateTrunc(\"week\", [<your_base_table>/date])" },
+          { "id": "bs-value", "name": "Base Value", "formula": "[<your_base_table>/value]" },
+          { "id": "bs-join-key", "name": "Join Key", "formula": "1", "description": "Constant for cross-join to scenario registry." }
+        ]
+      },
+      {
+        "id": "scenario-registry",
+        "kind": "input-table",
+        "name": "Forecast Log",
+        "description": "Registry of named scenarios + their lifecycle state. The record-of-truth for the approval flow.",
+        "columns": [
+          { "id": "fl-id", "name": "ID", "type": "row-id" },
+          { "id": "fl-name", "name": "Forecast Name", "type": "text" },
+          { "id": "fl-status", "name": "Status", "type": "text", "description": "Pending / null" },
+          { "id": "fl-sub-comments", "name": "Submission Comments", "type": "text" },
+          { "id": "fl-sub-by", "name": "Submitted By", "type": "text" },
+          { "id": "fl-sub-on", "name": "Submitted On", "type": "datetime" },
+          { "id": "fl-appr-status", "name": "Approval Status", "type": "text", "description": "Approve / Deny / Change Requested / null" },
+          { "id": "fl-appr-comments", "name": "Approval Comments", "type": "text" },
+          { "id": "fl-appr-by", "name": "Approval By", "type": "text" },
+          { "id": "fl-appr-on", "name": "Approval On", "type": "datetime" },
+          { "id": "fl-join-key", "name": "Join Key", "formula": "1" }
+        ]
+      },
+      {
+        "id": "scenario-fanout",
+        "kind": "linked-input-table",
+        "name": "Scenario Forecast",
+        "description": "Cross-join of base series x scenario registry. PK = (forecast_name, week). The override column is where users enter their scenario value.",
+        "source": {
+          "kind": "join",
+          "left": "base-series",
+          "right": "scenario-registry",
+          "leftKey": "bs-join-key",
+          "rightKey": "fl-join-key",
+          "type": "inner"
+        },
+        "primaryKey": ["fl-name", "bs-week"],
+        "columns": [
+          { "id": "sf-forecast-name", "name": "Forecast Name", "formula": "[scenario-registry/Forecast Name]" },
+          { "id": "sf-week", "name": "Week", "formula": "[base-series/Week]" },
+          { "id": "sf-base-value", "name": "Base Value", "formula": "[base-series/Base Value]" },
+          { "id": "sf-forecast-value", "name": "Forecast Value", "type": "number", "editable": true, "description": "User-entered override per (scenario, week)." }
+        ],
+        "conditionalEditing": [
+          {
+            "column": "sf-forecast-value",
+            "allowWhen": "Lookup([scenario-registry/Approval Status], [scenario-registry/Forecast Name], [sf-forecast-name]) != \"Approve\" OR IsNull(Lookup([scenario-registry/Approval Status], [scenario-registry/Forecast Name], [sf-forecast-name]))"
+          }
+        ]
+      }
+    ]
+  },
+
+  "workbook": {
+    "name": "Scenario Modeling Exemplar",
+    "pages": [
+      {
+        "id": "page-sources",
+        "name": "Sources",
+        "_hidden": true,
+        "elements": ["base-series", "scenario-registry", "scenario-fanout"]
+      },
+      {
+        "id": "page-editor",
+        "name": "Scenario Editor",
+        "controls": [
+          {
+            "id": "ctrl-forecast-name",
+            "name": "Active Forecast",
+            "type": "list",
+            "selectionMode": "single",
+            "includeNulls": false,
+            "source": { "element": "scenario-registry", "column": "fl-name" },
+            "filters": [{ "element": "scenario-fanout", "column": "sf-forecast-name" }]
+          }
+        ],
+        "buttons": [
+          {
+            "id": "btn-create",
+            "label": "Create new forecast",
+            "actions": [
+              { "type": "clear-control", "control": "ctrl-create-modal-name" },
+              { "type": "open-modal", "modal": "modal-create" }
+            ]
+          },
+          {
+            "id": "btn-submit",
+            "label": "Submit for approval",
+            "actions": [
+              { "type": "clear-control", "control": "ctrl-submit-modal-comments" },
+              { "type": "open-modal", "modal": "modal-submit" }
+            ]
+          },
+          {
+            "id": "btn-nav-approvals",
+            "label": "View approvals",
+            "actions": [{ "type": "navigate", "page": "page-approvals" }]
+          }
+        ],
+        "elements": ["scenario-fanout"],
+        "_note": "Hide the Forecast Name column on scenario-fanout — it's implied by ctrl-forecast-name."
+      },
+      {
+        "id": "page-approvals",
+        "name": "Approval Flow",
+        "elements": [
+          {
+            "id": "tbl-pending",
+            "kind": "table",
+            "source": "scenario-registry",
+            "filter": "[Status] = \"Pending\" AND IsNull([Approval Status])",
+            "columns": ["fl-name", "fl-sub-by", "fl-sub-on", "fl-sub-comments"],
+            "actionColumn": {
+              "id": "col-approve",
+              "label": "Approve",
+              "onClick": [
+                { "type": "clear-control", "control": "ctrl-final-modal-comments" },
+                { "type": "set-control-value", "control": "ctrl-approval-target-id", "value": "[fl-id]" },
+                { "type": "open-modal", "modal": "modal-final-approval" }
+              ]
+            }
+          },
+          {
+            "id": "tbl-approved",
+            "kind": "table",
+            "source": "scenario-registry",
+            "filter": "[Approval Status] = \"Approve\""
+          }
+        ],
+        "buttons": [
+          {
+            "id": "btn-nav-editor",
+            "label": "Back to editor",
+            "actions": [{ "type": "navigate", "page": "page-editor" }]
+          }
+        ]
+      }
+    ],
+    "modals": [
+      {
+        "id": "modal-create",
+        "showHeader": false,
+        "showFooter": false,
+        "controls": [{ "id": "ctrl-create-modal-name", "type": "text", "label": "Enter a forecast name" }],
+        "buttons": [
+          { "label": "Cancel", "style": "outline", "actions": [{ "type": "close-modal" }] },
+          {
+            "label": "Submit",
+            "style": "filled",
+            "actions": [
+              { "type": "insert-row", "target": "scenario-registry", "values": { "fl-name": "[ctrl-create-modal-name]" } },
+              { "type": "set-control-value", "control": "ctrl-forecast-name", "value": "[ctrl-create-modal-name]" },
+              { "type": "close-modal" }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "modal-submit",
+        "showHeader": false,
+        "showFooter": false,
+        "controls": [{ "id": "ctrl-submit-modal-comments", "type": "text", "label": "Submission comments" }],
+        "buttons": [
+          { "label": "Cancel", "style": "outline", "actions": [{ "type": "close-modal" }] },
+          {
+            "label": "Submit",
+            "style": "filled",
+            "actions": [
+              {
+                "type": "update-row",
+                "target": "scenario-registry",
+                "rowIdFormula": "Lookup([scenario-registry/ID], [scenario-registry/Forecast Name], [ctrl-forecast-name])",
+                "values": {
+                  "fl-status": "Pending",
+                  "fl-sub-comments": "[ctrl-submit-modal-comments]",
+                  "fl-sub-by": "CurrentUserEmail()",
+                  "fl-sub-on": "Now()"
+                }
+              },
+              { "type": "close-modal" }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "modal-final-approval",
+        "showHeader": false,
+        "showFooter": false,
+        "controls": [
+          {
+            "id": "ctrl-final-modal-decision",
+            "type": "segmented",
+            "options": ["Approve", "Deny", "Change Requested"]
+          },
+          { "id": "ctrl-final-modal-comments", "type": "text", "label": "Approval comments" },
+          { "id": "ctrl-approval-target-id", "type": "hidden" }
+        ],
+        "buttons": [
+          { "label": "Cancel", "style": "outline", "actions": [{ "type": "close-modal" }] },
+          {
+            "label": "Approve",
+            "style": "filled",
+            "actions": [
+              {
+                "type": "update-row",
+                "target": "scenario-registry",
+                "rowIdFormula": "[ctrl-approval-target-id]",
+                "values": {
+                  "fl-appr-status": "[ctrl-final-modal-decision]",
+                  "fl-appr-comments": "[ctrl-final-modal-comments]",
+                  "fl-appr-by": "CurrentUserEmail()",
+                  "fl-appr-on": "Now()"
+                }
+              },
+              { "type": "close-modal" }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "modal-locked",
+        "showHeader": false,
+        "showFooter": false,
+        "body": "No changes allowed on approved forecasts.",
+        "buttons": [{ "label": "OK", "style": "filled", "actions": [{ "type": "close-modal" }] }]
+      }
+    ],
+    "conditionalActions": [
+      {
+        "trigger": { "element": "scenario-fanout", "event": "select", "column": "sf-forecast-value" },
+        "if": "Lookup([scenario-registry/Approval Status], [scenario-registry/Forecast Name], [sf-forecast-name]) = \"Approve\"",
+        "then": [{ "type": "open-modal", "modal": "modal-locked" }]
+      }
+    ]
+  }
+}
