@@ -2,7 +2,8 @@ name: Daily Gong Call Sync
 
 on:
   schedule:
-    # 5 AM EST (10 AM UTC) every day
+    # 10:00 UTC every day = 06:00 America/New_York (EDT) / 05:00 (EST).
+    # Cron is always UTC, so the local hour shifts by one across DST.
     - cron: "0 10 * * *"
 
   workflow_dispatch:
@@ -11,12 +12,22 @@ on:
         description: "Dry run — print actions without writing files or committing"
         type: boolean
         default: false
+      since_days:
+        description: "Only keep calls from the last N days (blank = no date filter)"
+        type: string
+        default: ""
+
+concurrency:
+  # A long-running sync must not overlap a manual dispatch; both push.
+  group: gong-sync
+  cancel-in-progress: false
 
 jobs:
   sync:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # needed to commit and push prospect files
+      contents: write   # commit and push prospect files
+      issues: write     # open a failure issue (see notify job)
 
     steps:
       - name: Checkout repository
@@ -40,11 +51,82 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Pull latest (avoid push conflicts)
-        run: git pull --rebase origin main
+        run: git pull --rebase origin "${{ github.event.repository.default_branch }}"
 
       - name: Run sync
         env:
           SIGMA_BASE_URL: ${{ secrets.SIGMA_BASE_URL }}
           SIGMA_CLIENT_ID: ${{ secrets.SIGMA_CLIENT_ID }}
           SIGMA_CLIENT_SECRET: ${{ secrets.SIGMA_CLIENT_SECRET }}
-        run: python scripts/sync_gong_calls.py ${{ inputs.dry_run && '--dry-run' || '' }}
+          # config/me.py is gitignored, so the runner can't read it. Set REPS
+          # as a repository VARIABLE (not a secret — it isn't sensitive, and
+          # secrets are masked in logs, which makes this one hard to debug).
+          # Settings -> Secrets and variables -> Actions -> Variables.
+          REPS: ${{ vars.REPS }}
+        run: |
+          ARGS=""
+          [ "${{ inputs.dry_run }}" = "true" ] && ARGS="$ARGS --dry-run"
+          [ -n "${{ inputs.since_days }}" ] && ARGS="$ARGS --since ${{ inputs.since_days }}"
+          echo "Running: sync_gong_calls.py $ARGS"
+          python scripts/sync_gong_calls.py $ARGS
+
+      - name: Summarise run
+        if: always()
+        run: |
+          {
+            echo "### Gong sync — ${{ job.status }}"
+            echo
+            if [ -f prospects/.sync-status ]; then
+              echo '```'
+              cat prospects/.sync-status
+              echo '```'
+            else
+              echo "_No .sync-status written — the run failed before the heartbeat._"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  notify:
+    # Previously a failed run was silent: GitHub's default email is easy to
+    # miss, and a sync that finds nothing makes no commit either, so a dead
+    # cron looked exactly like a quiet Monday. An issue is visible and
+    # assignable, and needs no extra secret.
+    needs: sync
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the failure issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = 'Gong sync failing';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = [
+              `The nightly Gong sync failed on ${new Date().toISOString().slice(0, 10)}.`,
+              ``,
+              `Run: ${runUrl}`,
+              ``,
+              `Common causes:`,
+              `- Sigma API credentials rotated or expired (\`SIGMA_CLIENT_ID\` / \`SIGMA_CLIENT_SECRET\`)`,
+              `- The source workbook was renamed, moved, or its sharing changed`,
+              `- The rep-filter control ID changed (see \`REPS_CONTROL_ID\` in \`config/me.py\`)`,
+              `- A transient Sigma 5xx that outlasted the retry budget`,
+            ].join('\n');
+
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: 'gong-sync',
+            });
+
+            if (existing.data.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: existing.data[0].number, body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title, body, labels: ['gong-sync'],
+              });
+            }

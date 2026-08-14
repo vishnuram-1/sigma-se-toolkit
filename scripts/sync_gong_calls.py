@@ -3,21 +3,25 @@
 sync_gong_calls.py
 
 Exports the "VR Gong Calls" table from Sigma, then writes/updates
-per-prospect context_{account}.md files under prospects/.
+per-prospect context_{account}.txt files under prospects/.
 
 Usage:
-  # Nightly (auto-detects Monday for 72h lookback, else 24h):
+  # Nightly — take whatever the workbook returns, dedup against what's on disk:
   python scripts/sync_gong_calls.py
 
-  # One-time backfill of the past 30 days:
-  python scripts/sync_gong_calls.py --initial
+  # Backfill: only keep calls from the last N days:
+  python scripts/sync_gong_calls.py --since 90
 
-  # One-time full export of all data (no date filter):
+  # Explicitly no date filter (the default; kept for symmetry with --since):
   python scripts/sync_gong_calls.py --all
+
+  # Print the distinct rep names the workbook exposes, then exit. Use this to
+  # find the exact strings for config/me.py — a typo yields zero rows silently:
+  python scripts/sync_gong_calls.py --list-reps
 
   # Dry-run (print actions, write no files):
   python scripts/sync_gong_calls.py --dry-run
-  python scripts/sync_gong_calls.py --initial --dry-run
+  python scripts/sync_gong_calls.py --since 90 --dry-run
 
 Required env vars:
   SIGMA_CLIENT_ID       Sigma API client ID
@@ -30,6 +34,11 @@ Rep filter (primary):
 
 Rep filter (override, optional):
   REPS env var          Overrides config/me.py for one-off runs.
+
+Note on the date window: this script applies no server-side date filter. The
+export returns whatever the source workbook's own filters return, and dedup
+against the on-disk context files decides what is actually new. --since is a
+client-side filter applied after export.
 """
 
 import argparse
@@ -49,13 +58,36 @@ import requests
 # Config
 # ---------------------------------------------------------------------------
 
-WORKBOOK_NAME = "VR Gong Calls"
-WORKSPACE_NAME = "Client_B_Vish"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+PROSPECTS_DIR = REPO_ROOT / "prospects"
+
+# Source-workbook coordinates. Defaults match the shared SE workbook; override
+# any of them in config/me.py so a different workbook doesn't require editing
+# this file (which would conflict on every upstream pull).
+sys.path.insert(0, str(REPO_ROOT))
+try:
+    import config.me as _me
+except ImportError:  # no config/me.py — fall back to the shared defaults
+    _me = None
+
+
+def _cfg(name: str, default):
+    """Read a setting from config/me.py, falling back to the shared default."""
+    return getattr(_me, name, default) if _me else default
+
+
+WORKBOOK_NAME = _cfg("WORKBOOK_NAME", "VR Gong Calls")
+WORKSPACE_NAME = _cfg("WORKSPACE_NAME", "Client_B_Vish")
 
 # Control ID for the rep-filter on the Gong Calls table element.
-# Pass via the REPS env var, e.g. REPS="Eric Ratner,Justin Levy".
+# Pass via the REPS env var, e.g. REPS="Jane Doe,John Smith".
 # Empty / unset → no filter, all rows exported.
-REPS_CONTROL_ID = "New-Control"
+REPS_CONTROL_ID = _cfg("REPS_CONTROL_ID", "New-Control")
+
+# How long a prospect can go without a call before its transcript file is
+# pruned. Only the context_*.txt is removed — never the folder, which holds
+# hand-built scoping/data-model/workbook artifacts and a gitignored .env.
+STALE_AFTER_DAYS = _cfg("STALE_AFTER_DAYS", 90)
 
 # Column names as they appear in the Sigma table
 COL_DATE = "Day of Gong Call Date"
@@ -68,8 +100,10 @@ COL_OPP_OWNER = "Opportunity Owner User Name"
 
 SEPARATOR = "=" * 80
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-PROSPECTS_DIR = REPO_ROOT / "prospects"
+# Written every run, including no-op runs, so "did it run?" and "did it find
+# anything?" are separate questions. Without this a quiet Monday is
+# indistinguishable from a dead cron.
+STATUS_PATH = PROSPECTS_DIR / ".sync-status"
 
 
 # ---------------------------------------------------------------------------
@@ -212,21 +246,52 @@ def export_csv(base_url: str, token: str, workbook_id: str, element_id: str, rep
 
 
 def _poll_download(base_url: str, token: str, query_id: str) -> str:
-    """Poll /v2/query/{queryId}/download until the CSV is ready."""
+    """Poll /v2/query/{queryId}/download until the CSV is ready.
+
+    Transient 5xx responses are retried rather than fatal. On 2026-07-06 a
+    single 500 from this endpoint killed an otherwise-healthy nightly run —
+    the only failure in 90 days — because raise_for_status() fired on the
+    first non-2xx. Sigma's export backend returns 5xx intermittently under
+    load; the query is still valid, so retrying is correct.
+    """
+    server_errors = 0
     for attempt in range(30):
-        resp = requests.get(
-            f"{base_url}/v2/query/{query_id}/download",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=60,
-        )
+        try:
+            resp = requests.get(
+                f"{base_url}/v2/query/{query_id}/download",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=60,
+            )
+        except requests.exceptions.RequestException as exc:
+            server_errors += 1
+            if server_errors > 5:
+                raise
+            wait = 2 ** min(attempt, 4)
+            print(f"[warn] Network error polling export ({exc}); retry in {wait}s ...")
+            time.sleep(wait)
+            continue
+
         if resp.status_code == 200:
             resp.encoding = "utf-8"
             return resp.text
+
         if resp.status_code == 204:
             wait = 2 ** min(attempt, 4)  # exponential backoff capped at 16s
             print(f"[info] Not ready yet, waiting {wait}s ...")
             time.sleep(wait)
             continue
+
+        if resp.status_code >= 500:
+            server_errors += 1
+            if server_errors > 5:
+                print(f"[error] {server_errors} consecutive server errors; giving up.", file=sys.stderr)
+                resp.raise_for_status()
+            wait = 2 ** min(attempt, 4)
+            print(f"[warn] Sigma returned {resp.status_code}; retry {server_errors}/5 in {wait}s ...")
+            time.sleep(wait)
+            continue
+
+        # 4xx — a real client error. Retrying will not help.
         resp.raise_for_status()
 
     raise TimeoutError("Export did not complete within the allotted time.")
@@ -257,19 +322,24 @@ def parse_date(value: str) -> datetime | None:
         return None
 
 
-def compute_cutoff(initial: bool) -> datetime:
-    """Return the oldest date we should include."""
-    now = datetime.now(tz=timezone.utc)
-    if initial:
-        return now - timedelta(days=30)
-    # Monday (weekday==0) → look back 72h to cover the weekend
-    lookback_hours = 72 if now.weekday() == 0 else 24
-    print(f"[info] Nightly mode: lookback={lookback_hours}h (today is {now.strftime('%A')})")
-    return now - timedelta(hours=lookback_hours)
+def compute_cutoff(since_days: int | None) -> datetime | None:
+    """Oldest call date to keep, or None for no date filter.
+
+    There is deliberately no automatic nightly lookback window. The export has
+    no server-side date filter, so a window here would only discard rows that
+    dedup already skips — and would silently drop late-arriving Gong
+    transcripts for calls older than the window, which is precisely the case
+    the placeholder-backfill logic exists to handle.
+    """
+    if since_days is None:
+        return None
+    return datetime.now(tz=timezone.utc) - timedelta(days=since_days)
 
 
-def filter_rows(rows: list[dict], cutoff: datetime) -> list[dict]:
-    """Keep only rows whose Date is >= cutoff."""
+def filter_rows(rows: list[dict], cutoff: datetime | None) -> list[dict]:
+    """Keep only rows whose Date is >= cutoff. No cutoff → keep everything."""
+    if cutoff is None:
+        return rows
     result = []
     for row in rows:
         dt = parse_date(row.get(COL_DATE, ""))
@@ -325,19 +395,34 @@ def dedup_key(row: dict) -> str:
     return f"{date_str}||{title}"
 
 
-def existing_txt_keys(txt_path: Path) -> set[str]:
-    """Extract dedup keys already present in a context txt file.
+def parse_existing_entries(txt_path: Path) -> dict[str, tuple[str, bool]]:
+    """Parse a context txt file into {dedup_key: (entry_text, has_transcript)}.
 
-    Keys are on metadata lines: '{date}\\t{title}\\t...'
+    Entries are separated by blank lines. The first line of each entry is the
+    metadata line ('{date}\\t{title}\\t...'); any non-empty line(s) after that
+    are the transcript body. `has_transcript=False` means the entry is a
+    metadata-only placeholder — written when Gong hadn't finished transcribing
+    yet — and should be re-written when the transcript becomes available on a
+    later sync.
     """
     if not txt_path.exists():
-        return set()
-    keys = set()
-    for line in txt_path.read_text(encoding="utf-8").splitlines():
-        m = re.match(r"^(\d{4}-\d{2}-\d{2})\t(.+?)\t", line)
-        if m:
-            keys.add(f"{m.group(1)}||{m.group(2)}")
-    return keys
+        return {}
+    text = txt_path.read_text(encoding="utf-8")
+    if not text.strip():
+        return {}
+    result: dict[str, tuple[str, bool]] = {}
+    for block in re.split(r"\n{2,}", text.strip()):
+        block = block.rstrip("\n")
+        if not block:
+            continue
+        lines = block.split("\n")
+        m = re.match(r"^(\d{4}-\d{2}-\d{2})\t(.+?)\t", lines[0])
+        if not m:
+            continue
+        key = f"{m.group(1)}||{m.group(2)}"
+        has_transcript = any(line.strip() for line in lines[1:])
+        result[key] = (block, has_transcript)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -364,41 +449,72 @@ def write_prospects(rows: list[dict], dry_run: bool) -> int:
             reverse=True,
         )
 
-    new_entries = 0
+    def entry_date(block: str) -> str:
+        m = re.match(r"^(\d{4}-\d{2}-\d{2})\t", block)
+        return m.group(1) if m else "0000-00-00"
+
+    total_added = 0
+    total_updated = 0
     for account, account_rows in sorted(grouped.items()):
         folder_name = f"prospect_{sanitize_name(account)}"
         folder_path = PROSPECTS_DIR / folder_name
         txt_name = f"context_{sanitize_name(account)}.txt"
         txt_path = folder_path / txt_name
 
-        known = existing_txt_keys(txt_path)
-        new_blocks = []
+        existing = parse_existing_entries(txt_path)
+        added = 0
+        updated = 0
+        new_placeholder = 0
+
         for row in account_rows:
             key = dedup_key(row)
-            if key in known:
-                continue
-            new_blocks.append(format_txt_entry(row))
-            known.add(key)
+            row_has_transcript = bool(row.get(COL_TRANSCRIPT, "").strip())
+            new_block = format_txt_entry(row).rstrip("\n")
 
-        if not new_blocks:
+            if key in existing:
+                _, was_complete = existing[key]
+                if was_complete:
+                    continue  # Already complete — leave alone
+                # Existing entry is a metadata-only placeholder
+                if row_has_transcript:
+                    existing[key] = (new_block, True)
+                    updated += 1
+                # else: still no transcript — keep placeholder, wait for next sync
+            else:
+                # Brand-new key. Always record it so the call's metadata is
+                # preserved; if the transcript isn't ready yet, we write a
+                # placeholder and pick up the body on a future sync.
+                existing[key] = (new_block, row_has_transcript)
+                if row_has_transcript:
+                    added += 1
+                else:
+                    new_placeholder += 1
+
+        if not added and not updated and not new_placeholder:
             continue
 
-        new_entries += len(new_blocks)
-        print(f"[{'dry-run' if dry_run else 'write'}] {folder_name}/{txt_name}: +{len(new_blocks)} call(s)")
+        # Re-write the whole file in newest-first order so updates land in place
+        sorted_blocks = sorted(existing.values(), key=lambda v: entry_date(v[0]), reverse=True)
+        file_text = "\n\n".join(block for block, _ in sorted_blocks)
+
+        total_added += added
+        total_updated += updated
+        parts = []
+        if added:
+            parts.append(f"+{added} new")
+        if updated:
+            parts.append(f"~{updated} backfilled")
+        if new_placeholder:
+            parts.append(f"·{new_placeholder} placeholder (no transcript yet)")
+        print(f"[{'dry-run' if dry_run else 'write'}] {folder_name}/{txt_name}: {', '.join(parts)}")
 
         if dry_run:
             continue
 
         folder_path.mkdir(parents=True, exist_ok=True)
+        txt_path.write_text(file_text, encoding="utf-8")
 
-        # Prepend new entries (newest first) above existing content
-        existing = txt_path.read_text(encoding="utf-8") if txt_path.exists() else ""
-        new_content = "\n\n".join(new_blocks)
-        if existing:
-            new_content = new_content + "\n\n" + existing
-        txt_path.write_text(new_content, encoding="utf-8")
-
-    return new_entries
+    return total_added + total_updated
 
 
 # ---------------------------------------------------------------------------
@@ -407,17 +523,30 @@ def write_prospects(rows: list[dict], dry_run: bool) -> int:
 
 
 def cleanup_stale_prospects(dry_run: bool) -> int:
-    """Delete prospect folders with no call in the last 30 days. Returns count deleted."""
-    import shutil
+    """Prune transcript files for prospects with no call in STALE_AFTER_DAYS.
 
-    cutoff = datetime.now(tz=timezone.utc) - timedelta(days=30)
-    deleted = 0
+    Only ever deletes the sync-owned context_*.txt. The prospect folder itself
+    is left alone, and is removed only if pruning left it completely empty.
+
+    This function previously did shutil.rmtree(folder), which would have taken
+    scoping.md, data-models/, workbooks/, mockups/ and the gitignored (and
+    therefore unrecoverable) .env with it. A POV going quiet for a month is
+    normal, so that fired on live work — it just happened not to have been
+    noticed yet.
+    """
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(days=STALE_AFTER_DAYS)
+    pruned = 0
+
+    if not PROSPECTS_DIR.is_dir():
+        return 0
 
     for folder in sorted(PROSPECTS_DIR.iterdir()):
         if not folder.is_dir():
             continue
 
-        txt_files = list(folder.glob("*.txt"))
+        # Only sync-owned transcript files are candidates. A hand-placed .txt
+        # (e.g. a manual export kept for reference) is not ours to delete.
+        txt_files = sorted(folder.glob("context_*.txt"))
         if not txt_files:
             continue
 
@@ -430,14 +559,53 @@ def cleanup_stale_prospects(dry_run: bool) -> int:
                     if dt and (most_recent is None or dt > most_recent):
                         most_recent = dt
 
-        if most_recent is None or most_recent < cutoff:
-            age = f"last call {most_recent.date()}" if most_recent else "no dated calls"
-            print(f"[{'dry-run' if dry_run else 'delete'}] {folder.name} ({age}) — removing")
-            if not dry_run:
-                shutil.rmtree(folder)
-            deleted += 1
+        if most_recent is not None and most_recent >= cutoff:
+            continue
 
-    return deleted
+        age = f"last call {most_recent.date()}" if most_recent else "no dated calls"
+        other = [p for p in folder.iterdir() if p not in txt_files]
+        kept = f", keeping {len(other)} other file(s)" if other else ""
+        print(
+            f"[{'dry-run' if dry_run else 'prune'}] {folder.name} ({age}) — "
+            f"removing {len(txt_files)} transcript file(s){kept}"
+        )
+
+        if not dry_run:
+            for txt_path in txt_files:
+                txt_path.unlink()
+            # Remove the folder only if pruning left nothing behind.
+            if not any(folder.iterdir()):
+                folder.rmdir()
+        pruned += 1
+
+    return pruned
+
+
+# ---------------------------------------------------------------------------
+# Heartbeat
+# ---------------------------------------------------------------------------
+
+
+def write_status(rows: int, written: int, pruned: int, dry_run: bool) -> None:
+    """Record that a run happened, whether or not it found anything.
+
+    Committed alongside the transcripts, so the git history answers "did the
+    sync run today?" directly. Previously a run that found no new calls made
+    no commit at all, so eleven consecutive quiet Mondays looked identical to
+    a dead cron — which is what prompted this whole audit.
+    """
+    stamp = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+    body = (
+        f"last_run={stamp}\n"
+        f"rows_exported={rows}\n"
+        f"calls_written={written}\n"
+        f"prospects_pruned={pruned}\n"
+    )
+    if dry_run:
+        print(f"[dry-run] Would write {STATUS_PATH.name}: last_run={stamp}, rows={rows}")
+        return
+    PROSPECTS_DIR.mkdir(parents=True, exist_ok=True)
+    STATUS_PATH.write_text(body, encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -445,7 +613,7 @@ def cleanup_stale_prospects(dry_run: bool) -> int:
 # ---------------------------------------------------------------------------
 
 
-def git_commit_push(dry_run: bool) -> None:
+def git_commit_push(dry_run: bool, calls_changed: int = 0) -> None:
     """Stage prospect changes and commit + push if anything changed."""
     result = subprocess.run(
         ["git", "status", "--porcelain", "prospects/"],
@@ -456,7 +624,12 @@ def git_commit_push(dry_run: bool) -> None:
         return
 
     date_str = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
-    msg = f"chore: sync Gong calls {date_str}"
+    # Distinguish a real sync from a heartbeat-only run, so `git log` doesn't
+    # claim calls were synced on a day when nothing came in.
+    if calls_changed:
+        msg = f"chore: sync Gong calls {date_str} ({calls_changed} call(s))"
+    else:
+        msg = f"chore: Gong sync heartbeat {date_str} (no new calls)"
 
     if dry_run:
         print(f"[dry-run] Would commit: {msg}")
@@ -480,7 +653,28 @@ def main() -> None:
         action="store_true",
         help="Print what would be done without writing files or committing.",
     )
+    parser.add_argument(
+        "--since",
+        type=int,
+        metavar="N",
+        default=None,
+        help="Only keep calls from the last N days. Default: no date filter.",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="No date filter (the default; accepted for symmetry with --since).",
+    )
+    parser.add_argument(
+        "--list-reps",
+        action="store_true",
+        help="Print the distinct rep names the workbook exposes, then exit. "
+             "Use this to get the exact strings for config/me.py.",
+    )
     args = parser.parse_args()
+
+    if args.all and args.since is not None:
+        parser.error("--all and --since are mutually exclusive.")
 
     base_url = os.environ.get("SIGMA_BASE_URL", "").rstrip("/")
     client_id = os.environ.get("SIGMA_CLIENT_ID", "")
@@ -488,12 +682,8 @@ def main() -> None:
 
     # Reps come from config/me.py (committed in your fork). REPS env var
     # overrides for one-off runs. Empty string = unfiltered baseline.
-    sys.path.insert(0, str(REPO_ROOT))
-    try:
-        from config.me import REPS as _config_reps
-    except ImportError:
-        _config_reps = ""
-    reps = os.environ.get("REPS", _config_reps).strip()
+    # --list-reps must query unfiltered, or it would only echo back the filter.
+    reps = "" if args.list_reps else os.environ.get("REPS", _cfg("REPS", "")).strip()
 
     if not all([base_url, client_id, client_secret]):
         print(
@@ -519,27 +709,52 @@ def main() -> None:
     element_id = find_element(base_url, token, workbook_id)
     print(f"[info] Found element: id={element_id}")
 
-    # Export — the API always returns the last 30 days; dedup handles skipping known entries
+    # Export. No server-side date filter is applied — the workbook's own
+    # filters govern the window, and dedup decides what is actually new.
     print("[info] Exporting CSV ...")
     csv_text = export_csv(base_url, token, workbook_id, element_id, reps=reps)
     rows = parse_rows(csv_text)
     print(f"[info] Exported {len(rows)} row(s)")
 
-    if not rows:
-        print("[info] Nothing to do.")
+    # --list-reps: report and exit without touching any file.
+    if args.list_reps:
+        names = sorted({r.get(COL_OPP_OWNER, "").strip() for r in rows} - {""})
+        print(f"\nDistinct {COL_OPP_OWNER!r} values ({len(names)}):\n")
+        for name in names:
+            print(f"  {name}")
+        print(
+            "\nCopy the ones you cover into config/me.py, comma-separated, "
+            "no space after the comma:\n"
+            '  REPS = "Name One,Name Two"\n'
+        )
         return
 
-    # Write prospect files (dedup prevents re-writing existing calls)
-    new_entries = write_prospects(rows, dry_run=args.dry_run)
-    print(f"[info] New entries written: {new_entries}")
+    cutoff = compute_cutoff(args.since)
+    if cutoff is not None:
+        before = len(rows)
+        rows = filter_rows(rows, cutoff)
+        print(f"[info] --since {args.since}: kept {len(rows)} of {before} row(s)")
 
-    # Remove prospect folders with no call in the last 30 days
-    print("[info] Checking for stale prospect folders ...")
-    deleted = cleanup_stale_prospects(dry_run=args.dry_run)
-    print(f"[info] Stale folders removed: {deleted}")
+    written = pruned = 0
+    if rows:
+        # Write prospect files. Brand-new calls get a placeholder if Gong hasn't
+        # finished transcribing yet; previously-empty placeholders are backfilled
+        # in place once the transcript appears in a subsequent export.
+        written = write_prospects(rows, dry_run=args.dry_run)
+        print(f"[info] Calls newly written or backfilled: {written}")
 
-    # Commit & push
-    git_commit_push(dry_run=args.dry_run)
+        # Prune transcript files for prospects gone quiet. Never deletes a
+        # folder that still holds hand-built artifacts.
+        print("[info] Checking for stale transcripts ...")
+        pruned = cleanup_stale_prospects(dry_run=args.dry_run)
+        print(f"[info] Prospects pruned: {pruned}")
+    else:
+        print("[info] No rows to process.")
+
+    # Heartbeat first, so the commit below always has something to record.
+    write_status(len(rows), written, pruned, dry_run=args.dry_run)
+
+    git_commit_push(dry_run=args.dry_run, calls_changed=written)
     print("[info] Done.")
 
 

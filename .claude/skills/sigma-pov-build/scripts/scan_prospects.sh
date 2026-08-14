@@ -7,7 +7,12 @@
 
 set -euo pipefail
 
-PROSPECTS_DIR="${1:-$HOME/Prospects/vish-gong-test/prospects}"
+# Resolve the repo root from this script's own location, so the default works
+# wherever the toolkit is cloned. Precedence: explicit argument, then
+# CLAUDE_PROJECT_DIR, then the repo this script lives in.
+# Path here is .claude/skills/sigma-pov-build/scripts/ -> up 4 = repo root.
+_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+PROSPECTS_DIR="${1:-${CLAUDE_PROJECT_DIR:-$_repo_root}/prospects}"
 
 if [[ ! -d "$PROSPECTS_DIR" ]]; then
   echo "error: prospects dir not found: $PROSPECTS_DIR" >&2

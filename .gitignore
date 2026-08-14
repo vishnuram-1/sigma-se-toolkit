@@ -17,3 +17,8 @@ venv/
 
 # Logs from sync runs
 *.log
+
+# Per-SE config — copy config/me.example.py to config/me.py and edit.
+# Untracked so your rep list never conflicts with an upstream pull, and so
+# nobody inherits somebody else's prospects by forgetting to change it.
+config/me.py
