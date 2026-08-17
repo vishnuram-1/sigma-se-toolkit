@@ -181,7 +181,10 @@ else
 fi
 
 step "Done"
-echo "  Next:"
-echo "    scripts/install-skills.sh     install the Claude skills"
-echo "    scripts/sync_gong_calls.py --list-reps    re-check rep names any time"
-echo "    prospects/.sync-status        proof the last run happened"
+echo "  The Claude skills in .claude/skills/ load automatically when you run"
+echo "  Claude Code from this directory — nothing to install."
+echo
+echo "  Useful later:"
+echo "    python scripts/sync_gong_calls.py --list-reps   re-check rep names"
+echo "    cat prospects/.sync-status                      proof the last run happened"
+echo "    tail -20 git-pull.log                           local mirror activity"
