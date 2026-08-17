@@ -124,6 +124,31 @@ class TestCleanup(TempProspects):
         self.assertTrue((d / "manual_export.txt").exists())
         self.assertTrue((d / "scoping.md").exists())
 
+    def test_keeps_hand_authored_context_file(self):
+        """A context_*.txt with no dated entries is not a stale export.
+
+        The sync always writes a dated metadata line, even for a call Gong
+        hasn't transcribed yet. A file with none is hand-authored — real
+        example: a prospect folder holding typed-up demo notes. Staleness
+        can't be judged, so it must be left alone.
+        """
+        d = self.mk("prospect_Neura", {
+            "context_Neura.txt": "Sigma / Neura Health <> Demo\n\nnotes I typed myself\n",
+            "mockups/mock.html": "<html>",
+        })
+        self.assertEqual(m.cleanup_stale_prospects(dry_run=False), 0)
+        self.assertTrue((d / "context_Neura.txt").exists(), "deleted a hand-authored file")
+        self.assertTrue((d / "mockups/mock.html").exists())
+
+    def test_prunes_only_the_stale_file_in_a_mixed_folder(self):
+        d = self.mk("prospect_Mixed", {
+            "context_Mixed.txt": f"{OLD}\tOld\t5 min\tOpp\tOwner\nbody",
+            "context_Mixed_second.txt": f"{RECENT}\tNew\t5 min\tOpp\tOwner\nbody",
+        })
+        m.cleanup_stale_prospects(dry_run=False)
+        self.assertFalse((d / "context_Mixed.txt").exists(), "stale file not pruned")
+        self.assertTrue((d / "context_Mixed_second.txt").exists(), "pruned a fresh file")
+
     def test_dry_run_deletes_nothing(self):
         d = self.mk("prospect_Old", {"context_Old.txt": f"{OLD}\tOld\t5 min\tOpp\tOwner\nbody"})
         self.assertEqual(m.cleanup_stale_prospects(dry_run=True), 1)

@@ -546,32 +546,39 @@ def cleanup_stale_prospects(dry_run: bool) -> int:
 
         # Only sync-owned transcript files are candidates. A hand-placed .txt
         # (e.g. a manual export kept for reference) is not ours to delete.
-        txt_files = sorted(folder.glob("context_*.txt"))
-        if not txt_files:
-            continue
-
-        most_recent = None
-        for txt_path in txt_files:
+        stale: list[tuple[Path, datetime]] = []
+        for txt_path in sorted(folder.glob("context_*.txt")):
+            newest = None
             for line in txt_path.read_text(encoding="utf-8").splitlines():
                 m = re.match(r"^(\d{4}-\d{2}-\d{2})\t", line)
                 if m:
                     dt = parse_date(m.group(1))
-                    if dt and (most_recent is None or dt > most_recent):
-                        most_recent = dt
+                    if dt and (newest is None or dt > newest):
+                        newest = dt
 
-        if most_recent is not None and most_recent >= cutoff:
+            # No dated entries at all means we cannot judge staleness, and the
+            # file is far more likely hand-authored than a stale export — the
+            # sync always writes a dated metadata line, even for a call Gong
+            # hasn't transcribed. Leave it alone.
+            if newest is None:
+                continue
+            if newest < cutoff:
+                stale.append((txt_path, newest))
+
+        if not stale:
             continue
 
-        age = f"last call {most_recent.date()}" if most_recent else "no dated calls"
-        other = [p for p in folder.iterdir() if p not in txt_files]
+        other = [p for p in folder.iterdir() if p not in {t for t, _ in stale}]
         kept = f", keeping {len(other)} other file(s)" if other else ""
+        oldest = min(dt for _, dt in stale)
         print(
-            f"[{'dry-run' if dry_run else 'prune'}] {folder.name} ({age}) — "
-            f"removing {len(txt_files)} transcript file(s){kept}"
+            f"[{'dry-run' if dry_run else 'prune'}] {folder.name} "
+            f"(last call {oldest.date()}) — "
+            f"removing {len(stale)} transcript file(s){kept}"
         )
 
         if not dry_run:
-            for txt_path in txt_files:
+            for txt_path, _ in stale:
                 txt_path.unlink()
             # Remove the folder only if pruning left nothing behind.
             if not any(folder.iterdir()):
