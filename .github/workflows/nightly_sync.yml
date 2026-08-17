@@ -52,7 +52,16 @@ jobs:
           [ "$HAS_URL" = "true" ]    || missing="$missing SIGMA_BASE_URL(secret)"
           [ "$HAS_ID" = "true" ]     || missing="$missing SIGMA_CLIENT_ID(secret)"
           [ "$HAS_SECRET" = "true" ] || missing="$missing SIGMA_CLIENT_SECRET(secret)"
-          [ "$HAS_REPS" = "true" ]   || missing="$missing REPS(variable)"
+          # REPS can come from the variable OR from a tracked config/me.py.
+          # This repo gitignores that file so the variable is required, but a
+          # fork may track it — don't skip a run that has what it needs.
+          if [ "$HAS_REPS" != "true" ]; then
+            if grep -qE '^REPS = "[^"]+"' config/me.py 2>/dev/null; then
+              echo "REPS supplied by a tracked config/me.py"
+            else
+              missing="$missing REPS(variable)"
+            fi
+          fi
 
           if [ -n "$missing" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"

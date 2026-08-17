@@ -35,10 +35,12 @@ Rep filter (primary):
 Rep filter (override, optional):
   REPS env var          Overrides config/me.py for one-off runs.
 
-Note on the date window: this script applies no server-side date filter. The
-export returns whatever the source workbook's own filters return, and dedup
-against the on-disk context files decides what is actually new. --since is a
-client-side filter applied after export.
+Note on the date window: the source workbook has three filter controls on the
+table. This script overrides only the rep list; the other two — including a
+date filter measured at ~28 days — keep their saved defaults. So the export
+reaches back about a month no matter what, and --since is a client-side
+filter that can narrow that but never widen it. Widening means changing the
+workbook's own date control.
 """
 
 import argparse
@@ -677,7 +679,9 @@ def main() -> None:
         type=int,
         metavar="N",
         default=None,
-        help="Only keep calls from the last N days. Default: no date filter.",
+        help="Only keep calls from the last N days (client-side). The ceiling is "
+             "the source workbook's own date window, ~28 days, which this script "
+             "does not override. Default: no date filter.",
     )
     parser.add_argument(
         "--all",
@@ -797,6 +801,23 @@ def main() -> None:
         before = len(rows)
         rows = filter_rows(rows, cutoff)
         print(f"[info] --since {args.since}: kept {len(rows)} of {before} row(s)")
+
+        # --since is a CLIENT-side filter. The ceiling is the source workbook's
+        # own date control, which this script does not override — measured at
+        # ~28 days. Asking for more than the workbook returns is silently a
+        # no-op, so surface it rather than implying a deeper backfill happened.
+        dates = [d for d in (parse_date(r.get(COL_DATE, "")) for r in rows) if d]
+        if dates:
+            oldest = min(dates)
+            reach = (datetime.now(tz=timezone.utc) - oldest).days
+            if args.since > reach + 2:
+                print(
+                    f"[warn] --since {args.since} asked for {args.since} days but the oldest call\n"
+                    f"       available is {oldest.date()} ({reach} days back). The export is capped by\n"
+                    f"       the source workbook's own date filter, which this script does not\n"
+                    f"       override — so this is the full history you can reach today.",
+                    file=sys.stderr,
+                )
 
     written = pruned = 0
     if rows:
