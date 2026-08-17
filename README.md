@@ -47,8 +47,6 @@ scripts/install-skills.sh --uninstall
 | `sigma-pov-build` | The POV workflow: read scoping → ground in the live warehouse → data model → workbook, with six approval gates before any write |
 | `sigma-scoping` | Writes `scoping.md` from Gong transcripts and whatever data artifacts the prospect folder holds |
 | `sigma-use-cases` | Ten tailored use cases for a named prospect, as a branded single-slide deck |
-| `sigma-scenario-modeling` | Scenario / what-if apps built on input tables |
-| `sigma-fin-recon` | Reconciliation workbooks (GL tie-out, bank recon, variance). Its exemplar spec is still a placeholder — see the skill's own note. |
 
 ### Installed from upstream
 
@@ -76,6 +74,24 @@ Both upstream repos also publish plugin manifests, so
 `/plugin marketplace add sigmacomputing/sigma-agent-skills` is a valid alternative
 for those two. The installer uses one mechanism for all three so there's a single
 thing to reason about.
+
+### Optional add-ons, not bundled
+
+Separate marketplaces, worth installing depending on what you build:
+
+```
+/plugin marketplace add cmiller-coder/millersigma        # company dashboards,
+                                                         # input-table / scenario apps,
+                                                         # cohort builders, embed portals
+/plugin marketplace add twells89/sigma-migration-skills  # Looker -> Sigma migration
+```
+
+`millersigma:sigma-input-table-app` is the reason this repo ships no
+scenario-modeling skill of its own: it covers the same ground, including the
+Submit → Approve → lock lifecycle, and is actively maintained. The scoping
+judgement that isn't in it — whether a prospect's ask is that shape, and what
+the grain should be per vertical — lives in
+`sigma-pov-build/reference/scenario-modeling-patterns.md`.
 
 ---
 

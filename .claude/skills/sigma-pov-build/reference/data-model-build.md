@@ -66,6 +66,6 @@ For an existing model (spec has `_metadata.id`):
 
 ## When to defer to another skill
 
-- **Scenario / what-if** (named scenarios, approval-and-lock workflow) → use `sigma-scenario-modeling`. Pairs naturally with this skill: the data model holds the base table + Input Tables for overrides; the scenario-modeling skill encodes the cross-join, page-control filter, and modal-edit primitives.
+- **Scenario / what-if** (named scenarios, approval-and-lock workflow) → check the shape and pick the grain with [`scenario-modeling-patterns.md`](scenario-modeling-patterns.md), then build with `sigma-input-table-app` from the `millersigma` marketplace. The data model holds the base table plus Input Tables for overrides; that skill encodes the cross-join, page-control filter and modal-edit primitives.
 - **Generic workbook layout rules** → `sigma-workbook-conventions` after the model is done. Read the chunked `reference/specification/*` and `reference/workflows/*` before drafting the workbook plan.
-- **Recon-shaped use case** (GL tie-out, bank recon, sub-ledger ↔ GL) — no skill currently. The upstream `sigma-fin-recon` was deleted 2026-05-13 because it was a placeholder with no real exemplar. Re-add when 2-3 real recon specs exist (likely candidate: Newity loss-curve work).
+- **Recon-shaped use case** (GL tie-out, bank recon, sub-ledger ↔ GL) — no skill currently. One was dropped because it prescribed a structure with only a placeholder exemplar behind it. Re-add when 2-3 real recon specs exist to anchor the pattern.

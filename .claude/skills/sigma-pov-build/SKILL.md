@@ -50,15 +50,15 @@ Before drafting any workbook plan, `sigma-workbook-conventions` requires a hard 
 | OAuth → bearer token, base URL per cloud | `sigma-api` |
 | Data model spec field reference (sources, columns, metrics, etc.) | `sigma-data-models` |
 | Workbook spec authoring — element naming, page/folder layout, POST-vs-PUT pitfalls, the chunked `reference/specification/*` (charts, controls, formulas, layout, tables, etc.) and `reference/workflows/*` (crud, discover, plan, validate, from-image) | `sigma-workbook-conventions` |
-| Scenario / what-if pages (named scenarios, approval workflow, lock-on-approve) | `sigma-scenario-modeling` |
+| Scenario / what-if pages — is it that shape, and what's the grain? | [`reference/scenario-modeling-patterns.md`](reference/scenario-modeling-patterns.md) |
+| Scenario / what-if **build mechanics** (input tables, modals, approve-and-lock) | `sigma-input-table-app` — **not bundled**; install the `millersigma` plugin marketplace |
 | Branded embed portal deployment | `sigma-embed-portal` — **not bundled**; install the `millersigma` plugin marketplace if you need it |
 | Everything below (folder shape, warehouse grounding, approval flow) | This skill |
 
-`sigma-fin-recon` ships here but its exemplar spec is still a placeholder, so it
-prescribes a recon structure without a verified spec to anchor generation. Treat
-its page/KPI guidance as a starting point, and replace
-`examples/exemplar-spec.json` with a real `GET /v2/workbooks/{id}/spec` from a
-known-good recon workbook before relying on it.
+There is no recon-specific skill. One shipped here briefly but prescribed a
+structure with a placeholder exemplar behind it, which is worse than nothing —
+it reads as verified guidance. Re-add only with 2-3 real recon specs to anchor
+the pattern.
 
 ## Workflow at a glance
 

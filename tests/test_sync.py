@@ -435,6 +435,25 @@ class TestSkills(unittest.TestCase):
                               "an installed upstream skill could be committed, "
                               "re-creating the fork this replaced")
 
+    def test_readme_skill_table_matches_what_ships(self):
+        """The README's skill tables drifted from reality repeatedly during this
+        rework — skills renamed, added and dropped faster than the docs."""
+        import re
+        readme = (REPO / "README.md").read_text()
+        documented = set(re.findall(r"^\| `(sigma-[a-z-]+)`", readme, re.M))
+        shipped = {d.name for d in self.SKILLS.iterdir()
+                   if d.is_dir() and not d.is_symlink()}
+        expected = shipped | set(self.UPSTREAM_OWNED)
+
+        self.assertEqual(
+            documented - expected, set(),
+            "README documents skills that aren't shipped or installed",
+        )
+        self.assertEqual(
+            expected - documented, set(),
+            "shipped skills missing from the README tables",
+        )
+
     def test_api_scripts_resolve_a_token_fetcher_in_repo(self):
         """_env.sh must work in a fresh clone, not only on the author's machine."""
         env = (REPO / "scripts" / "api" / "_env.sh").read_text()
