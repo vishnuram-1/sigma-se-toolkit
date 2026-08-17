@@ -115,8 +115,12 @@ Checks prerequisites, verifies your Sigma credentials against `/v2/whoami`, list
 
 ```bash
 cp config/me.example.py config/me.py
-python scripts/sync_gong_calls.py --list-reps   # exact strings — a typo returns zero rows silently
+python scripts/sync_gong_calls.py --list-reps   # exact strings — a typo returns zero rows
 ```
+
+`REPS` holds the **AEs you support**, not your own name. The filter matches the
+opportunity's owner, and you're the SE on the call — so entering your own name
+returns nothing and looks like a clean run.
 
 `config/me.py` is gitignored, so your rep list never conflicts with an upstream pull.
 
@@ -216,7 +220,7 @@ Everything lives in `config/me.py` (gitignored; copy from `config/me.example.py`
 
 | Setting | Default | Notes |
 |---|---|---|
-| `REPS` | `""` | Comma-separated Opportunity Owner names, no space after the comma. **Required** — the script refuses to run unfiltered unless passed `--allow-unfiltered`. |
+| `REPS` | `""` | Comma-separated Opportunity Owner names — **the AEs you support, not your own name**. No space after the comma. **Required**; the script refuses to run unfiltered unless passed `--allow-unfiltered`. |
 | `WORKBOOK_NAME` | `VR Gong Calls` | Source workbook |
 | `WORKSPACE_NAME` | `Client_B_Vish` | Workspace the workbook lives in |
 | `REPS_CONTROL_ID` | `New-Control` | Element ID of the rep-filter control |

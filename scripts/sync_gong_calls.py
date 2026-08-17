@@ -751,6 +751,22 @@ def main() -> None:
     rows = parse_rows(csv_text)
     print(f"[info] Exported {len(rows)} row(s)")
 
+    # A filter that matches nothing is the single most likely misconfiguration,
+    # and without this it reads as a clean run: exit 0, no changes, no clue.
+    # The usual cause is putting your own name in REPS — the column is the
+    # opportunity's OWNER (the AE), and you're the SE on the call.
+    if reps and not rows:
+        print(
+            f"\n[warn] REPS={reps!r} matched zero calls.\n"
+            "       Names are matched literally, so this is almost certainly a\n"
+            "       wrong or misspelled value rather than a genuinely quiet period.\n"
+            "       REPS holds the AEs you support, not your own name.\n"
+            "\n"
+            "       See the exact strings the workbook exposes:\n"
+            "         python scripts/sync_gong_calls.py --list-reps\n",
+            file=sys.stderr,
+        )
+
     # --list-reps: report and exit without touching any file.
     if args.list_reps:
         names = sorted({r.get(COL_OPP_OWNER, "").strip() for r in rows} - {""})

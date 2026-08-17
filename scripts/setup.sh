@@ -125,7 +125,11 @@ elif [ -n "${CLIENT_ID:-}" ] && [ -n "${CLIENT_SECRET:-}" ]; then
   echo "  Fetching the rep names the workbook exposes ..."
   if SIGMA_BASE_URL="$BASE_URL" SIGMA_CLIENT_ID="$CLIENT_ID" SIGMA_CLIENT_SECRET="$CLIENT_SECRET" \
      python3 scripts/sync_gong_calls.py --list-reps; then
-    REPS=$(ask "Your reps, comma-separated, no space after the comma (blank = all)")
+    echo
+    echo "  Enter the AEs you support — these are Opportunity Owner names from the"
+    echo "  list above, NOT your own name. You are the SE on the call; the filter"
+    echo "  matches the opportunity's owner."
+    REPS=$(ask "AE names, comma-separated, no space after the comma")
     cp config/me.example.py config/me.py
     python3 - "$REPS" <<'PY'
 import re, sys, pathlib
