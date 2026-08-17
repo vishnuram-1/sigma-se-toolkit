@@ -104,8 +104,11 @@ python scripts/sync_gong_calls.py --since 90      # only keep calls from the las
 python scripts/sync_gong_calls.py --all           # no date filter (the default)
 python scripts/sync_gong_calls.py --list-reps     # print distinct rep names, then exit
 python scripts/sync_gong_calls.py --dry-run       # print actions, write nothing
-REPS="Other Rep" python scripts/sync_gong_calls.py  # one-off override
+python scripts/sync_gong_calls.py --allow-unfiltered   # deliberately pull EVERY rep's calls
+REPS="Other Rep" python scripts/sync_gong_calls.py     # one-off override
 ```
+
+**A rep filter is required.** Without one the export returns every rep's calls, including prospects that aren't yours — which is almost always an unfinished setup rather than a deliberate choice. The script refuses to run and tells you how to fix it. `--allow-unfiltered` opts in on purpose; `--list-reps` bypasses the check because it has to query unfiltered to work.
 
 There is no automatic nightly date window. The export has no server-side date filter, so a window would only discard rows that dedup already skips — and would silently drop late-arriving Gong transcripts, which is exactly what the placeholder-backfill logic exists to handle.
 
@@ -157,7 +160,7 @@ Everything lives in `config/me.py` (gitignored; copy from `config/me.example.py`
 
 | Setting | Default | Notes |
 |---|---|---|
-| `REPS` | `""` | Comma-separated Opportunity Owner names, no space after the comma. Empty = no filter. |
+| `REPS` | `""` | Comma-separated Opportunity Owner names, no space after the comma. **Required** — the script refuses to run unfiltered unless passed `--allow-unfiltered`. |
 | `WORKBOOK_NAME` | `VR Gong Calls` | Source workbook |
 | `WORKSPACE_NAME` | `Client_B_Vish` | Workspace the workbook lives in |
 | `REPS_CONTROL_ID` | `New-Control` | Element ID of the rep-filter control |

@@ -17,7 +17,10 @@ The env var takes precedence over this file, so the two never fight.
 """
 
 # Comma-separated Opportunity Owner names, no space after the comma.
-# Empty string = no filter (every row the workbook returns).
+#
+# REQUIRED. Left empty, the export returns every rep's calls — including
+# prospects that aren't yours — so the script refuses to run and says so.
+# Pass --allow-unfiltered if you genuinely want the whole company's calls.
 #
 # Get the exact strings — they are matched literally, and a typo returns zero
 # rows while looking like a completely successful run:

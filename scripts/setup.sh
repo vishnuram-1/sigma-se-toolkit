@@ -160,7 +160,15 @@ fi
 
 # --- 6. backfill ------------------------------------------------------------
 step "6. Backfill"
-if [ -n "${CLIENT_ID:-}" ] && yes_no "Run a 90-day backfill now (dry-run first)?"; then
+CONFIGURED_REPS=$(grep -E '^REPS = ' config/me.py 2>/dev/null | sed 's/^REPS = "//; s/"$//')
+if [ -z "${CLIENT_ID:-}" ]; then
+  warn "Skipping — no credentials entered."
+elif [ -z "$CONFIGURED_REPS" ]; then
+  # Don't let setup trip the unfiltered guard and surface a confusing exit 2.
+  warn "Skipping — no reps set yet, and an unfiltered sync would pull every"
+  warn "rep's calls. Set REPS in config/me.py, then:"
+  warn "  python3 scripts/sync_gong_calls.py --since 90 --dry-run"
+elif yes_no "Run a 90-day backfill now (dry-run first)?"; then
   SIGMA_BASE_URL="$BASE_URL" SIGMA_CLIENT_ID="$CLIENT_ID" SIGMA_CLIENT_SECRET="$CLIENT_SECRET" \
     python3 scripts/sync_gong_calls.py --since 90 --dry-run
   if yes_no "Looks right — run it for real?"; then
