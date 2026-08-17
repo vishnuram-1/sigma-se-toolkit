@@ -388,10 +388,15 @@ class TestSkills(unittest.TestCase):
     UPSTREAM_OWNED = ("sigma-api", "sigma-data-models", "sigma-workbook-conventions")
 
     def test_upstream_skills_are_not_vendored(self):
-        vendored = [s for s in self.UPSTREAM_OWNED if (self.SKILLS / s).exists()]
+        """A symlink created by install-skills.sh is fine; a real directory of
+        copied files is the fork this replaced."""
+        vendored = [
+            s for s in self.UPSTREAM_OWNED
+            if (self.SKILLS / s).is_dir() and not (self.SKILLS / s).is_symlink()
+        ]
         self.assertEqual(
             vendored, [],
-            "these are maintained upstream and must be installed by "
+            "these are maintained upstream and must be linked by "
             "scripts/install-skills.sh, not copied into this repo",
         )
 
@@ -402,12 +407,33 @@ class TestSkills(unittest.TestCase):
                 self.assertIn(f'"{skill}:', installer,
                               "not listed in the installer's UPSTREAM array")
 
-    def test_installer_links_every_owned_skill(self):
-        """It globs .claude/skills, so a new skill is picked up automatically —
-        this guards against that glob being replaced by a hardcoded list."""
+    def test_installer_links_upstream_into_the_repo_not_the_home_dir(self):
+        """Default install must be self-contained. Skills maintained here need
+        no install at all — Claude Code loads .claude/skills/ when run from the
+        repo root, which is where prospects/ lives anyway. Touching
+        ~/.claude/skills by default would collide with whatever the SE already
+        has installed there."""
         installer = (REPO / "scripts" / "install-skills.sh").read_text()
-        self.assertIn(".claude/skills", installer)
-        self.assertIn("own_skills", installer)
+        self.assertIn("../../vendor/", installer, "upstream links must be repo-relative")
+        self.assertIn("--user", installer, "user-scope linking must be opt-in")
+        # The user-scope block must sit behind the flag.
+        self.assertIn('LINK_USER:-0}" = "1"', installer)
+
+    def test_installer_rejects_stub_paths(self):
+        """Upstream moved a skill and left a 1-file stub at the old path; an
+        existence check on SKILL.md happily linked the stub."""
+        installer = (REPO / "scripts" / "install-skills.sh").read_text()
+        self.assertIn("n_files", installer)
+        self.assertIn("-lt 2", installer, "no guard against linking a stub")
+
+    def test_vendor_and_upstream_links_are_gitignored(self):
+        ignored = (REPO / ".gitignore").read_text()
+        self.assertIn("vendor/", ignored)
+        for skill in self.UPSTREAM_OWNED:
+            with self.subTest(skill=skill):
+                self.assertIn(f".claude/skills/{skill}", ignored,
+                              "an installed upstream skill could be committed, "
+                              "re-creating the fork this replaced")
 
     def test_api_scripts_resolve_a_token_fetcher_in_repo(self):
         """_env.sh must work in a fresh clone, not only on the author's machine."""

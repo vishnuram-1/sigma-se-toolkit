@@ -22,3 +22,10 @@ venv/
 # Untracked so your rep list never conflicts with an upstream pull, and so
 # nobody inherits somebody else's prospects by forgetting to change it.
 config/me.py
+
+# Upstream skills, cloned by scripts/install-skills.sh. Not vendored: the
+# copies that used to live in .claude/skills/ drifted 54 commits behind.
+vendor/
+.claude/skills/sigma-api
+.claude/skills/sigma-data-models
+.claude/skills/sigma-workbook-conventions

@@ -24,15 +24,20 @@ The skills are useful on their own and need no setup at all. The Gong sync needs
 ```bash
 git clone https://github.com/<your-org>/<your-repo>.git
 cd <your-repo>
-scripts/install-skills.sh
+scripts/install-skills.sh     # fetches the 3 upstream-maintained skills
+claude                        # all 8 skills load
 ```
 
-That symlinks every skill into `~/.claude/skills/`, so they load from **any** directory rather than only when Claude Code is started from inside this repo. Re-run it any time to refresh the upstream ones.
+The skills maintained here need **no install** — Claude Code picks up `.claude/skills/` automatically when you run it from the repo root, which is where `prospects/` lives and therefore where you'd be working anyway.
+
+`install-skills.sh` exists only for the three skills that belong to other repos. It clones them into `vendor/` (gitignored) and symlinks them into `.claude/skills/` with repo-relative links. Nothing outside the repo is touched.
 
 ```bash
 scripts/install-skills.sh --list       # show what points where
-scripts/install-skills.sh --own-only   # skip the upstream clones
-scripts/install-skills.sh --uninstall  # remove only the links it created
+scripts/install-skills.sh              # re-run to refresh upstream
+scripts/install-skills.sh --user       # ALSO link into ~/.claude/skills/, if you
+                                       #   work from directories outside this repo
+scripts/install-skills.sh --uninstall
 ```
 
 ### Maintained here
@@ -55,9 +60,22 @@ These are **not** vendored here. They belong to other repos, and the installer c
 | `sigma-data-models` | [sigmacomputing/sigma-agent-skills](https://github.com/sigmacomputing/sigma-agent-skills) |
 | `sigma-workbook-conventions` | [RyanLauderback/ryan-workbook-skill](https://github.com/RyanLauderback/ryan-workbook-skill) |
 
-This repo used to ship forked copies of all three. They drifted badly — the `ryan-workbook-skill` fork was 54 commits behind, and its `sigma-workbook-conventions` had 4 files where upstream has 37, including eight worked example specs. Forks also broke references that are correct in their home repo, because a copied skill leaves its sibling `docs/` and plugin manifest behind.
+This repo used to ship forked copies of all three, and the drift was severe: the
+vendored `sigma-workbook-conventions` had **4 files where current upstream has 77**
+— the entire chunked `reference/specification/` tree and eight worked example specs,
+missing. Forking also broke references that are correct in their home repo, because
+a copied skill leaves its sibling `docs/` and plugin manifest behind.
 
-Both upstream repos also publish plugin manifests, so `/plugin marketplace add sigmacomputing/sigma-agent-skills` is a valid alternative to the symlink for those two. The installer uses symlinks for all three so there's one mechanism to reason about.
+Upstream layouts move. `ryan-workbook-skill` relocated its canonical skill from
+`.claude/skills/` to `skills/` and left a one-file stub at the old path, so the
+installer checks that a link resolves to a real skill rather than just to *a*
+`SKILL.md`. If upstream moves again you'll get a clear warning naming the repo to
+check.
+
+Both upstream repos also publish plugin manifests, so
+`/plugin marketplace add sigmacomputing/sigma-agent-skills` is a valid alternative
+for those two. The installer uses one mechanism for all three so there's a single
+thing to reason about.
 
 ---
 
