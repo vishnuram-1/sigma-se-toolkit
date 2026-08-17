@@ -215,15 +215,27 @@ def find_element(base_url: str, token: str, workbook_id: str) -> str:
 def export_csv(base_url: str, token: str, workbook_id: str, element_id: str, reps: str = "") -> str:
     """Export the workbook element as CSV. Returns the raw CSV text.
 
-    If `reps` is non-empty, applies it as the New-Control filter
-    server-side (comma-separated list, no space after comma).
+    The rep filter is ALWAYS sent explicitly, even when empty:
+
+      parameters omitted        -> the workbook's SAVED DEFAULT for the control
+                                   applies. On the shared workbook that default
+                                   is one particular SE's rep list, so omitting
+                                   it silently scopes your export to somebody
+                                   else's accounts. Measured: 91 rows, 4 owners.
+      {control: ""}             -> genuinely no filter. Measured: 3742 rows,
+                                   187 owners.
+      {control: "A,B"}          -> just those owners. Measured: 51 rows for
+                                   "Sean Gross,Joe Konen".
+
+    Omitting the key is never what anyone wants, so it is never done. An empty
+    `reps` means the caller explicitly asked for everything (--list-reps or
+    --allow-unfiltered), and that is what it gets.
     """
     payload: dict = {
         "elementId": element_id,
         "format": {"type": "csv"},
+        "parameters": {REPS_CONTROL_ID: reps},
     }
-    if reps:
-        payload["parameters"] = {REPS_CONTROL_ID: reps}
 
     resp = sigma_post(base_url, token, f"/v2/workbooks/{workbook_id}/export", payload)
 
