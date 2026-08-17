@@ -24,18 +24,40 @@ The skills are useful on their own and need no setup at all. The Gong sync needs
 ```bash
 git clone https://github.com/<your-org>/<your-repo>.git
 cd <your-repo>
+scripts/install-skills.sh
 ```
 
-The skills live in `.claude/skills/` and load automatically when you run Claude Code from this directory.
+That symlinks every skill into `~/.claude/skills/`, so they load from **any** directory rather than only when Claude Code is started from inside this repo. Re-run it any time to refresh the upstream ones.
+
+```bash
+scripts/install-skills.sh --list       # show what points where
+scripts/install-skills.sh --own-only   # skip the upstream clones
+scripts/install-skills.sh --uninstall  # remove only the links it created
+```
+
+### Maintained here
 
 | Skill | What it covers |
 |---|---|
-| `sigma-api` | OAuth client-credentials → bearer token, base URL per cloud region |
-| `sigma-data-models` | Data model spec reference — columns, metrics, relationships, filters, controls, CLS |
-| `sigma-workbook-conventions` | Naming, page layout, create-vs-update ID semantics, and the workbook-spec gotchas that cost the most iterations |
-| `sigma-pov-build` | The POV workflow: scoping → data model → workbook, with approval gates before any write |
+| `sigma-pov-build` | The POV workflow: read scoping → ground in the live warehouse → data model → workbook, with six approval gates before any write |
+| `sigma-scoping` | Writes `scoping.md` from Gong transcripts and whatever data artifacts the prospect folder holds |
+| `sigma-use-cases` | Ten tailored use cases for a named prospect, as a branded single-slide deck |
 | `sigma-scenario-modeling` | Scenario / what-if apps built on input tables |
-| `sigma-fin-recon` | Reconciliation workbooks (GL tie-out, bank recon, variance) |
+| `sigma-fin-recon` | Reconciliation workbooks (GL tie-out, bank recon, variance). Its exemplar spec is still a placeholder — see the skill's own note. |
+
+### Installed from upstream
+
+These are **not** vendored here. They belong to other repos, and the installer clones them so `git pull` is the update path.
+
+| Skill | Upstream |
+|---|---|
+| `sigma-api` | [sigmacomputing/sigma-agent-skills](https://github.com/sigmacomputing/sigma-agent-skills) |
+| `sigma-data-models` | [sigmacomputing/sigma-agent-skills](https://github.com/sigmacomputing/sigma-agent-skills) |
+| `sigma-workbook-conventions` | [RyanLauderback/ryan-workbook-skill](https://github.com/RyanLauderback/ryan-workbook-skill) |
+
+This repo used to ship forked copies of all three. They drifted badly — the `ryan-workbook-skill` fork was 54 commits behind, and its `sigma-workbook-conventions` had 4 files where upstream has 37, including eight worked example specs. Forks also broke references that are correct in their home repo, because a copied skill leaves its sibling `docs/` and plugin manifest behind.
+
+Both upstream repos also publish plugin manifests, so `/plugin marketplace add sigmacomputing/sigma-agent-skills` is a valid alternative to the symlink for those two. The installer uses symlinks for all three so there's one mechanism to reason about.
 
 ---
 

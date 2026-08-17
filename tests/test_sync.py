@@ -382,6 +382,33 @@ class TestSkills(unittest.TestCase):
                 self.assertIn("name:", head)
                 self.assertIn("description:", head)
 
+    # Skills maintained in other repos. Vendoring these is what caused the
+    # drift: the ryan-workbook-skill fork sat 54 commits behind upstream, with
+    # 4 files where upstream had 37, and nothing to signal it.
+    UPSTREAM_OWNED = ("sigma-api", "sigma-data-models", "sigma-workbook-conventions")
+
+    def test_upstream_skills_are_not_vendored(self):
+        vendored = [s for s in self.UPSTREAM_OWNED if (self.SKILLS / s).exists()]
+        self.assertEqual(
+            vendored, [],
+            "these are maintained upstream and must be installed by "
+            "scripts/install-skills.sh, not copied into this repo",
+        )
+
+    def test_installer_covers_every_upstream_skill(self):
+        installer = (REPO / "scripts" / "install-skills.sh").read_text()
+        for skill in self.UPSTREAM_OWNED:
+            with self.subTest(skill=skill):
+                self.assertIn(f'"{skill}:', installer,
+                              "not listed in the installer's UPSTREAM array")
+
+    def test_installer_links_every_owned_skill(self):
+        """It globs .claude/skills, so a new skill is picked up automatically —
+        this guards against that glob being replaced by a hardcoded list."""
+        installer = (REPO / "scripts" / "install-skills.sh").read_text()
+        self.assertIn(".claude/skills", installer)
+        self.assertIn("own_skills", installer)
+
     def test_api_scripts_resolve_a_token_fetcher_in_repo(self):
         """_env.sh must work in a fresh clone, not only on the author's machine."""
         env = (REPO / "scripts" / "api" / "_env.sh").read_text()

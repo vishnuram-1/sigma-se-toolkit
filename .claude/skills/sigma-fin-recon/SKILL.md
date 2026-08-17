@@ -87,5 +87,7 @@ without the exemplar but is much sharper with it.
 - `reference/kpis.md` — full metric definitions (formula, format, dependencies).
 
 For field-level questions (how to express a metric, how relationships work,
-how column-level security applies) defer to `sigma-data-models/reference/`
-in the upstream skill (mirrored at `vendor/sigma-agent-skills/`).
+how column-level security applies) defer to the `sigma-data-models` skill's
+`reference/` directory. That skill is maintained upstream in
+[sigmacomputing/sigma-agent-skills](https://github.com/sigmacomputing/sigma-agent-skills)
+and installed by `scripts/install-skills.sh`, not vendored into this repo.

@@ -189,8 +189,13 @@ else
 fi
 
 step "Done"
-echo "  The Claude skills in .claude/skills/ load automatically when you run"
-echo "  Claude Code from this directory — nothing to install."
+echo "  Next: install the Claude skills."
+echo "    scripts/install-skills.sh"
+echo
+echo "  That symlinks this repo's skills into ~/.claude/skills/ so they load from"
+echo "  any directory, and clones the three upstream-maintained ones"
+echo "  (sigma-api, sigma-data-models, sigma-workbook-conventions) which are"
+echo "  deliberately not vendored here."
 echo
 echo "  Useful later:"
 echo "    python scripts/sync_gong_calls.py --list-reps   re-check rep names"
