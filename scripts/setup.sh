@@ -10,7 +10,7 @@
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$REPO"
+cd "$REPO" || { echo "error: cannot cd to $REPO" >&2; exit 1; }
 
 bold() { printf '\033[1m%s\033[0m\n' "$*"; }
 warn() { printf '  ! %s\n' "$*"; }

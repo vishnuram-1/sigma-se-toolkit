@@ -1,0 +1,54 @@
+name: Tests
+
+# The template's sync script had silently regressed to a revision predating
+# the placeholder-backfill fix, and nothing caught it. This is the guard
+# against that happening again — including to anyone's downstream copy.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "scripts/**"
+      - "config/**"
+      - "tests/**"
+      - ".github/workflows/**"
+      - "requirements.txt"
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.10 is the floor — the script uses `X | None` annotations.
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pyyaml
+
+      - name: Run tests
+        run: python tests/test_sync.py
+
+      - name: Check the sync script has no import-time side effects
+        run: python -c "import importlib.util, sys; sys.argv=['x']; s=importlib.util.spec_from_file_location('m','scripts/sync_gong_calls.py'); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); print('imported cleanly')"
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          # SC1091: sourced files not followed. SC2086: intentional word
+          # splitting when building the arg list.
+          find scripts .claude -name "*.sh" -print0 \
+            | xargs -0 shellcheck --severity=warning --exclude=SC1091,SC2086

@@ -671,6 +671,13 @@ def main() -> None:
         help="Print the distinct rep names the workbook exposes, then exit. "
              "Use this to get the exact strings for config/me.py.",
     )
+    parser.add_argument(
+        "--allow-unfiltered",
+        action="store_true",
+        help="Permit a run with no rep filter, pulling EVERY rep's calls. "
+             "Off by default: an unset REPS is almost always an unfinished "
+             "setup, not a deliberate request for the whole company's calls.",
+    )
     args = parser.parse_args()
 
     if args.all and args.since is not None:
@@ -692,7 +699,28 @@ def main() -> None:
         )
         sys.exit(1)
 
-    mode = f"filtered to REPS={reps!r}" if reps else "unfiltered (full workbook)"
+    # An empty rep filter exports every rep's calls. That is a legitimate but
+    # rare choice, and an overwhelmingly common symptom of setup that stopped
+    # halfway — so it has to be asked for, not defaulted into.
+    if not reps and not args.list_reps and not args.allow_unfiltered:
+        print(
+            "[error] No rep filter set — this would pull EVERY rep's calls,\n"
+            "        including prospects that aren't yours.\n"
+            "\n"
+            "        Set one of:\n"
+            "          config/me.py        REPS = \"Your Name\"   (local runs)\n"
+            "          repo variable REPS                        (GitHub Action)\n"
+            "          REPS=\"Your Name\" python scripts/sync_gong_calls.py\n"
+            "\n"
+            "        Find the exact strings:\n"
+            "          python scripts/sync_gong_calls.py --list-reps\n"
+            "\n"
+            "        If you really do want every rep, pass --allow-unfiltered.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    mode = f"filtered to REPS={reps!r}" if reps else "UNFILTERED (every rep, explicitly allowed)"
     print(f"[info] Starting sync — dry_run={args.dry_run}, mode: {mode}")
 
     # Auth
