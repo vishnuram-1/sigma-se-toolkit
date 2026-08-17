@@ -5,7 +5,7 @@ Each prospect has its own Sigma org and its own API client. Credentials live in 
 ## File location
 
 ```
-~/Prospects/vish-gong-test/prospects/prospect_<Name>/.env
+prospects/prospect_<Name>/.env
 ```
 
 ## Required keys
@@ -18,13 +18,22 @@ SIGMA_CLIENT_SECRET=...
 
 ## Loading
 
-When a Sigma API call is needed for a prospect:
+Don't load credentials by hand. The globalized Sigma scripts at `scripts/api/*.sh` all source `_env.sh` on first call, which:
+
+1. Reads `.env` from the **current working directory** (so `cd` into the prospect folder first).
+2. Fetches an OAuth token via the `sigma-api` skill's `get-token.sh`.
+3. Caches the token at `/tmp/.sigma_token` (mode 0600, 55-min TTL).
+4. Exports `SIGMA_BASE_URL`, `SIGMA_API_TOKEN`, and the `sigma_curl` helper (auto-injects `Authorization` + `Accept: application/json`, retries once on 401 after re-fetching).
+
+The implication: **never `cat .env` or `source .env` directly**. Always invoke through the scripts. If you need bare `sigma_curl` from a one-off bash command (e.g., a GET that doesn't have a wrapper script), source `_env.sh` once and use `sigma_curl`:
 
 ```bash
-set -a; source prospects/prospect_<Name>/.env; set +a
+cd prospects/prospect_<Name>
+source scripts/api/_env.sh
+sigma_curl "$SIGMA_BASE_URL/v2/files?limit=5"
 ```
 
-Then defer to the `sigma-api` skill — it handles the OAuth exchange and returns a bearer token.
+This pattern keeps `SIGMA_CLIENT_SECRET` out of the calling shell's env entirely — only `SIGMA_API_TOKEN` (a short-lived bearer) ends up exported.
 
 ## Safety invariants
 
@@ -39,7 +48,7 @@ These are **non-negotiable**. Violating any of them is a session-ending bug.
 ## Verifying gitignore before first .env is created
 
 ```bash
-grep -E "^\*\*/\.env$|^\.env$" ~/Prospects/vish-gong-test/.gitignore
+grep -E "^\*\*/\.env$|^\.env$" .gitignore
 ```
 
 Must return at least one match. If empty → halt and tell the user to fix `.gitignore` first.

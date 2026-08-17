@@ -297,6 +297,99 @@ class TestShellScripts(unittest.TestCase):
         self.assertEqual(offenders, [], "personal values in shipped files")
 
 
+class TestSkills(unittest.TestCase):
+    """The skills are the half of this repo that isn't exercised by running it.
+
+    Every check here corresponds to something that was actually wrong: paths
+    pointing at one person's laptop, references to files that don't exist, and
+    a docx-based flow that had already been replaced.
+    """
+
+    SKILLS = REPO / ".claude" / "skills"
+
+    def skill_files(self, *suffixes):
+        return [
+            p for p in self.SKILLS.rglob("*")
+            if p.is_file() and p.suffix in set(suffixes)
+        ]
+
+    def test_no_absolute_user_paths(self):
+        offenders = []
+        for p in self.skill_files(".md", ".sh", ".py", ".json"):
+            text = p.read_text(encoding="utf-8", errors="ignore")
+            for needle in ("/Users/", "~/Prospects/", "vish-gong-test"):
+                if needle in text:
+                    offenders.append(f"{p.relative_to(self.SKILLS)}: {needle}")
+        self.assertEqual(offenders, [], "skills reference a specific machine")
+
+    def test_no_named_individuals(self):
+        offenders = [
+            str(p.relative_to(self.SKILLS))
+            for p in self.skill_files(".md")
+            if "Vishnu" in p.read_text(encoding="utf-8", errors="ignore")
+        ]
+        self.assertEqual(offenders, [], "skills name a specific person")
+
+    def test_internal_markdown_links_resolve(self):
+        """Catch `reference/foo.md` and `scripts/bar.sh` links that point nowhere."""
+        import re
+        offenders = []
+        for p in self.skill_files(".md"):
+            skill_root = p.parent
+            while skill_root.parent != self.SKILLS and skill_root != self.SKILLS:
+                skill_root = skill_root.parent
+            for target in re.findall(r"\]\((((?:reference|scripts|examples)/[^)#]+))\)",
+                                     p.read_text(encoding="utf-8", errors="ignore")):
+                rel = target[0]
+                if not (skill_root / rel).exists():
+                    offenders.append(f"{p.relative_to(self.SKILLS)} -> {rel}")
+        self.assertEqual(offenders, [], "broken intra-skill links")
+
+    def test_no_references_to_removed_docx_flow(self):
+        """scoping.md is written by sigma-scoping; there is no docx step."""
+        offenders = []
+        for p in self.skill_files(".md", ".sh"):
+            text = p.read_text(encoding="utf-8", errors="ignore")
+            if "scoping-enrichment" in text:
+                offenders.append(f"{p.relative_to(self.SKILLS)}: scoping-enrichment (deleted)")
+            if "sigma-pov-build/scripts/convert_docx" in text:
+                offenders.append(f"{p.relative_to(self.SKILLS)}: convert_docx moved to sigma-scoping")
+        self.assertEqual(offenders, [], "stale docx-flow references")
+
+    def test_referenced_scripts_exist(self):
+        """Skills reference scripts/... both repo-relative (scripts/api/*.sh at
+        the repo root) and skill-relative (a skill's own scripts/ dir). Accept
+        either; fail only when neither resolves."""
+        import re
+        offenders = []
+        for p in self.skill_files(".md"):
+            skill_root = p.parent
+            while skill_root.parent != self.SKILLS and skill_root != self.SKILLS:
+                skill_root = skill_root.parent
+            text = p.read_text(encoding="utf-8", errors="ignore")
+            for ref in set(re.findall(r"`(scripts/(?:api/)?[a-z_][a-z0-9_-]*\.(?:sh|py))`", text)):
+                if not (REPO / ref).exists() and not (skill_root / ref).exists():
+                    offenders.append(f"{p.relative_to(self.SKILLS)} -> {ref}")
+        self.assertEqual(offenders, [], "skills reference scripts that don't exist")
+
+    def test_every_skill_has_frontmatter_name_and_description(self):
+        for skill_dir in sorted(d for d in self.SKILLS.iterdir() if d.is_dir()):
+            with self.subTest(skill=skill_dir.name):
+                skill_md = skill_dir / "SKILL.md"
+                self.assertTrue(skill_md.exists(), "missing SKILL.md")
+                head = skill_md.read_text(encoding="utf-8")[:1200]
+                self.assertTrue(head.startswith("---"), "no YAML frontmatter")
+                self.assertIn("name:", head)
+                self.assertIn("description:", head)
+
+    def test_api_scripts_resolve_a_token_fetcher_in_repo(self):
+        """_env.sh must work in a fresh clone, not only on the author's machine."""
+        env = (REPO / "scripts" / "api" / "_env.sh").read_text()
+        self.assertIn("_sigma_repo_root", env)
+        self.assertIn("scripts/api/get-token.sh", env)
+        self.assertTrue((REPO / "scripts" / "api" / "get-token.sh").exists())
+
+
 class TestWorkflow(unittest.TestCase):
     def test_workflow_is_valid_yaml_and_gated(self):
         try:

@@ -1,21 +1,26 @@
 # Data model build
 
-Map `scoping.md` → a Sigma data model spec, then write to disk for review. Don't POST without approval.
+Map the **warehouse overview + `scoping.md`** → a Sigma data model spec, then write to disk for review. Don't POST without approval.
+
+> **Provisional (2026-06-30).** The spec-drafting sequence below (step 2 onward) is slated for deeper, per-step refinement — treat it as a work-in-progress, not settled doctrine. The one part that is now firm: the model is grounded in the **measured** warehouse (step 1 / `reference/warehouse-overview.md`), never in scoping's assertions alone.
 
 ## Inputs
 
+The measured warehouse is the source of truth; `scoping.md` supplies intent and business language. On conflict, the warehouse wins.
+
+From the **warehouse overview** (step 3, `reference/warehouse-overview.md`) — the primary input:
+- **Real tables, columns, and types** — copied verbatim.
+- **Measured grain and join fan-out** — dictates where metrics need `COUNT(DISTINCT <entity>)`.
+- **Null rates and value domains** — dictate calculated columns, filters, and control options.
+
 From `scoping.md`:
 - **Use case** — determines what the model needs to answer.
-- **Data references** — table(s), columns, quirks.
 - **Stakeholders** — drives metric naming (use business language they speak).
 - **Priority artifacts** — explicit metric and dimension asks.
 
-From the prospect's Sigma org (via `sigma-api` token):
-- `GET /v2/connections` — find the warehouse connection ID for the source. Pause if missing.
-
 ## Build sequence
 
-1. **Verify connection.** `GET /v2/connections` against the prospect org. Find the connection that matches `scoping.md`'s warehouse (BigQuery, Snowflake, Redshift, etc.). If none, halt and surface this as a setup blocker for the AE — Claude cannot create connections via API.
+1. **Ground the model in the warehouse (do not skip).** Complete the warehouse overview per `reference/warehouse-overview.md`: match the connection via `scripts/api/list-connections.sh` (cd into the prospect folder first so `.env` resolves), then discover and **sample** the relevant tables with the Sigma MCP `describe`/`query` tools. Produce the reconciliation (scoping asserts vs. measured) and clear Gate 2. If no matching connection exists, halt and surface as an AE setup blocker — Claude cannot create connections via API. **No spec is drafted until this is done.**
 
 2. **Draft the spec.** Use `sigma-data-models` skill for field-level reference. Components:
    - **Sources** — table reference (database.schema.table), connection ID.
@@ -31,12 +36,14 @@ From the prospect's Sigma org (via `sigma-api` token):
 
 4. **Show the user.** Surface a summary (sources, column count, metric count, calculated columns by name). Pause. Wait for explicit approval. This is gate 3 (see `approval-gates.md`).
 
-5. **POST.** On approval:
+5. **POST.** On approval, from the prospect folder. There's no `publish-data-model.sh` wrapper in upstream — data-model POSTs go through `sigma_curl` (the helper that `_env.sh` exports, with 401 auto-retry):
    ```bash
-   curl -X POST "$SIGMA_BASE_URL/v2/data-models" \
-     -H "Authorization: Bearer $TOKEN" \
+   cd prospects/prospect_<Name>
+   source scripts/api/_env.sh
+   sigma_curl -X POST \
      -H "Content-Type: application/json" \
-     --data @data-models/<name>.json
+     --data-binary @data-models/<name>.json \
+     "$SIGMA_BASE_URL/v2/data-models"
    ```
    Capture the returned `id`. Write it back into the spec file under `"_metadata": {"id": "...", "posted_at": "..."}` so future updates know to PUT, not POST.
 
@@ -59,5 +66,6 @@ For an existing model (spec has `_metadata.id`):
 
 ## When to defer to another skill
 
-- **Recon-shaped use case** (GL tie-out, bank recon, sub-ledger ↔ GL) → use `sigma-fin-recon` as an additional reference. It provides exemplar metric definitions and aging-bucket patterns.
-- **Generic workbook layout rules** → `sigma-workbook-conventions` after the model is done.
+- **Scenario / what-if** (named scenarios, approval-and-lock workflow) → use `sigma-scenario-modeling`. Pairs naturally with this skill: the data model holds the base table + Input Tables for overrides; the scenario-modeling skill encodes the cross-join, page-control filter, and modal-edit primitives.
+- **Generic workbook layout rules** → `sigma-workbook-conventions` after the model is done. Read the chunked `reference/specification/*` and `reference/workflows/*` before drafting the workbook plan.
+- **Recon-shaped use case** (GL tie-out, bank recon, sub-ledger ↔ GL) — no skill currently. The upstream `sigma-fin-recon` was deleted 2026-05-13 because it was a placeholder with no real exemplar. Re-add when 2-3 real recon specs exist (likely candidate: Newity loss-curve work).

@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 # Lists prospect folders that are ready for the POV workflow.
-# A prospect is "ready" if it has both a scoping artifact (.docx or .md)
-# AND a non-empty Gong context_*.txt.
+# A prospect is "ready" when it has a scoping.md AND a non-empty Gong
+# context_*.txt. scoping.md is written by the sigma-scoping skill; there is no
+# .docx step in the flow.
+#
+# ARTIFACTS counts hand-built work in the folder (data-models/, workbooks/,
+# mockups/, reference/) — a prospect with artifacts but no scoping.md usually
+# means scoping was skipped, which is worth seeing.
 #
 # Usage: scan_prospects.sh [path-to-prospects-dir]
 
@@ -19,19 +24,24 @@ if [[ ! -d "$PROSPECTS_DIR" ]]; then
   exit 1
 fi
 
-printf "%-50s %-10s %-10s %-10s\n" "PROSPECT" "DOCX" "MD" "CONTEXT"
-printf "%-50s %-10s %-10s %-10s\n" "--------" "----" "--" "-------"
+printf "%-44s %-10s %-10s %-10s\n" "PROSPECT" "SCOPING" "CONTEXT" "ARTIFACTS"
+printf "%-44s %-10s %-10s %-10s\n" "--------" "-------" "-------" "---------"
 
 for dir in "$PROSPECTS_DIR"/prospect_*/; do
   [[ -d "$dir" ]] || continue
   name=$(basename "$dir" | sed 's/^prospect_//')
 
-  docx_status="-"
   md_status="-"
   context_status="-"
+  artifact_status="-"
 
-  [[ -f "$dir/scoping.docx" ]] && docx_status="yes"
   [[ -f "$dir/scoping.md" ]] && md_status="yes"
+
+  # Count files in any subdirectory — data-models/, workbooks/, mockups/,
+  # reference/, plugins/, LookML/, whatever the prospect actually supplied.
+  # A fixed subfolder list would miss customer-shaped ones.
+  artifacts=$(find "$dir" -mindepth 2 -type f -not -name ".*" 2>/dev/null | wc -l | tr -d ' ')
+  [[ "$artifacts" -gt 0 ]] && artifact_status="${artifacts}f"
 
   context_file=$(ls "$dir"/context_*.txt 2>/dev/null | head -1 || true)
   if [[ -n "$context_file" && -s "$context_file" ]]; then
@@ -39,11 +49,11 @@ for dir in "$PROSPECTS_DIR"/prospect_*/; do
     context_status="${size}L"
   fi
 
-  # Only print rows that have at least one signal of being worked
-  if [[ "$docx_status" == "yes" || "$md_status" == "yes" || "$context_status" != "-" ]]; then
-    printf "%-50s %-10s %-10s %-10s\n" "$name" "$docx_status" "$md_status" "$context_status"
+  # Only print rows with at least one signal of being worked
+  if [[ "$md_status" == "yes" || "$context_status" != "-" || "$artifact_status" != "-" ]]; then
+    printf "%-44s %-10s %-10s %-10s\n" "$name" "$md_status" "$context_status" "$artifact_status"
   fi
 done
 
 echo ""
-echo "Ready for build = (DOCX or MD) AND CONTEXT present."
+echo "Ready for build = SCOPING and CONTEXT present. No scoping.md? Run sigma-scoping."
